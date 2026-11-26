@@ -19,7 +19,7 @@ export default function TermsPage() {
           <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight font-mono">
             Termos de Uso do Serviço
           </h1>
-          <p className="text-xs text-slate-400 mt-2 font-mono">Última atualização: Novembro de 2026</p>
+          <p className="text-xs text-slate-400 mt-2 font-mono">Rascunho de protótipo — precisa de revisão jurídica e identificação do operador antes do lançamento.</p>
         </header>
 
         <div className="space-y-6 text-sm text-slate-300 leading-relaxed font-light">
@@ -28,7 +28,7 @@ export default function TermsPage() {
               1. Objeto e Aceitação
             </h2>
             <p>
-              Estes Termos de Uso regem a utilização da plataforma <strong>NexusFlow</strong>, uma solução de tecnologia voltada à ingestão, orquestração e monitoramento de webhooks e eventos transacionais. Ao criar uma conta ou utilizar as APIs do NexusFlow, o usuário declara concordar integralmente com as disposições aqui estabelecidas.
+              Este projeto está em desenvolvimento. Estes termos são um rascunho e não constituem ainda um contrato de serviço. O operador, os canais de suporte, os preços e as condições finais ainda precisam ser definidos.
             </p>
           </section>
 
@@ -61,7 +61,7 @@ export default function TermsPage() {
               4. Disponibilidade e Nível de Serviço (SLA)
             </h2>
             <p>
-              O NexusFlow emprega infraestrutura serverless redundante e monitoramento contínuo para manter disponibilidade superior a 99.9%. No entanto, paradas programadas para manutenção corretiva e preventiva serão comunicadas previamente quando viável.
+              O protótipo não oferece compromisso de disponibilidade (SLA). Não há garantia de operação contínua ou suporte neste estágio.
             </p>
           </section>
 
@@ -70,7 +70,7 @@ export default function TermsPage() {
               5. Propriedade Intelectual e Licença
             </h2>
             <p>
-              Todo o código-fonte, marcas, interfaces gráficas e algoritmos que compõem o NexusFlow são de titularidade exclusiva de seus desenvolvedores e licenciantes. O usuário adquire uma licença revogável, não exclusiva e intransferível de uso do software como serviço (SaaS).
+              Os direitos sobre código, marcas e conteúdo devem ser definidos pelo titular do projeto antes da distribuição ou da oferta do serviço.
             </p>
           </section>
 

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowLeft, ShieldCheck, Lock, Eye, Database, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Lock, Database } from 'lucide-react';
 
 export default function PrivacyPage() {
   return (
@@ -14,12 +14,12 @@ export default function PrivacyPage() {
 
         <header className="border-b border-white/10 pb-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-mono border border-emerald-500/20 mb-3">
-            <ShieldCheck size={14} /> Conformidade LGPD & GDPR
+            <ShieldCheck size={14} /> Privacidade
           </div>
           <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight font-mono">
             Política de Privacidade e Proteção de Dados
           </h1>
-          <p className="text-xs text-slate-400 mt-2 font-mono">Em estrita observância à Lei Geral de Proteção de Dados (Lei 13.709/2018)</p>
+          <p className="text-xs text-slate-400 mt-2 font-mono">Informações do protótipo; revisar e completar antes de oferecer o serviço ao público.</p>
         </header>
 
         <div className="space-y-6 text-sm text-slate-300 leading-relaxed font-light">
@@ -32,9 +32,9 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-1 text-slate-400 text-xs font-mono">
               <li><strong>Dados de Conta:</strong> Nome e endereço de e-mail do titular da conta;</li>
-              <li><strong>Credenciais Criptografadas:</strong> Senha com hash irreversível via algoritmo Bcrypt (fator de custo 10);</li>
+              <li><strong>Credenciais:</strong> Senhas armazenadas usando hash bcrypt; tokens de redefinição e verificação são armazenados como hashes;</li>
               <li><strong>Tokens de Autenticação:</strong> Hashes criptográficos SHA-256 de API Keys (nunca o segredo em texto puro);</li>
-              <li><strong>Metadados de Telemetria:</strong> Endereço IP do emissor de webhooks, latência de execução (ms), códigos de status HTTP e registros de entrega.</li>
+              <li><strong>Metadados:</strong> IP pode ser usado temporariamente para limitar requisições; logs guardam um resumo do evento, latência e resultado, sem o conteúdo pessoal completo.</li>
             </ul>
           </section>
 
@@ -43,7 +43,7 @@ export default function PrivacyPage() {
               2. Finalidade e Base Legal do Tratamento
             </h2>
             <p>
-              O tratamento de dados é realizado estritamente para a execução de contrato e prestação dos serviços contratados (Art. 7º, V da LGPD), bem como para o cumprimento de obrigações legais de registro de acesso a aplicações (Marco Civil da Internet, Art. 15).
+              As finalidades, bases legais, prazos de retenção e responsabilidades dos fornecedores precisam ser definidos pelo operador do serviço antes do lançamento. Não use dados reais neste protótipo.
             </p>
           </section>
 
@@ -57,7 +57,7 @@ export default function PrivacyPage() {
                   <Lock size={13} /> Criptografia em Trânsito e Repouso
                 </span>
                 <p className="text-slate-400 font-light leading-relaxed">
-                  Tráfego protegido com protocolo HTTPS/TLS obrigatório e banco de dados Neon criptografado.
+                  A aplicação deve ser publicada somente em HTTPS. A segurança do armazenamento depende também das configurações e dos contratos do provedor escolhido.
                 </p>
               </div>
               <div className="p-3.5 rounded-xl bg-slate-950/80 border border-white/5 space-y-1">
@@ -65,7 +65,7 @@ export default function PrivacyPage() {
                   <Database size={13} /> Isolamento Multi-Inquilino
                 </span>
                 <p className="text-slate-400 font-light leading-relaxed">
-                  Workspaces estritamente separados por chaves primárias UUID v4. Nenhuma mistura entre contas.
+                  As consultas principais são limitadas ao usuário autenticado. Isso não substitui uma revisão independente nem garante ausência de falhas.
                 </p>
               </div>
             </div>
@@ -76,12 +76,11 @@ export default function PrivacyPage() {
               4. Direitos dos Titulares de Dados
             </h2>
             <p>
-              Em conformidade com o Artigo 18 da LGPD, o usuário pode exercer a qualquer momento:
+              Antes de produção, o operador deve configurar um canal de contato e processos para solicitações dos titulares. Atualmente o protótipo não oferece exportação ou exclusão de conta pelo painel.
             </p>
             <ul className="list-disc pl-5 space-y-1 text-slate-400 text-xs font-mono">
-              <li><strong>Direito de Acesso e Portabilidade:</strong> Exportação completa de seus logs e pipelines em formatos abertos (CSV e JSON) diretamente pelo painel;</li>
-              <li><strong>Direito de Retificação:</strong> Atualização de nome e redefinição instantânea de senha;</li>
-              <li><strong>Direito à Eliminação (Esquecimento):</strong> Exclusão total de sua conta com remoção em cascata (ON DELETE CASCADE) de todos os registros de telemetria e chaves do banco de dados.</li>
+              <li>Acesso, correção e exclusão, conforme fluxo a ser definido pelo operador;</li>
+              <li>Portabilidade dos dados em formato estruturado, conforme aplicável.</li>
             </ul>
           </section>
 
@@ -90,7 +89,7 @@ export default function PrivacyPage() {
               5. Compartilhamento com Terceiros
             </h2>
             <p>
-              O NexusFlow <strong>não comercializa</strong> dados pessoais em nenhuma hipótese. Os dados transitam exclusivamente através de provedores de infraestrutura essenciais (Neon para persistência de dados e Resend para disparo de e-mails transacionais configurados pelo próprio usuário).
+              O serviço usa provedores de banco de dados e e-mail configurados pelo operador. A lista efetiva, os países de processamento e os contratos precisam ser confirmados para cada ambiente antes da publicação.
             </p>
           </section>
         </div>

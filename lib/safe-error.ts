@@ -1,28 +1,22 @@
-/**
- * NexusFlow Safe Error Handler & Sanitizer
- * Garante que nenhuma string de conexão, senha, token ou credencial
- * do .env seja vazada em respostas JSON de erro para o cliente.
- */
+const safeMessages = new Set([
+  'Destino HTTP não permitido. Use um endereço HTTPS público na porta padrão.',
+  'Destino HTTP não permitido.',
+  'Tempo limite do destino excedido.',
+  'Provedor de e-mail indisponível.',
+  'Provedor de e-mail recusou a mensagem.',
+  'Informe um e-mail de destino no evento.',
+  'A automação não tem um destino configurado.',
+  'Esta ação ainda não está habilitada.',
+]);
 
-export function sanitizeErrorMessage(error: unknown, fallback: string = 'Erro interno no servidor'): string {
-  if (!error) return fallback;
+export function sanitizeErrorMessage(error: unknown, fallback = 'Erro interno no servidor'): string {
+  const message = typeof error === 'string'
+    ? error
+    : error instanceof Error
+      ? error.message
+      : '';
 
-  let message = typeof error === 'string' ? error : (error as any)?.message || fallback;
-
-  // Filtra padrões de URLs com credenciais (ex: postgresql://user:pass@...)
-  message = message.replace(/postgresql:\/\/[^@\s]+@[^\s]+/gi, 'postgresql://[REDACTED]');
-  message = message.replace(/postgres:\/\/[^@\s]+@[^\s]+/gi, 'postgres://[REDACTED]');
-  
-  // Filtra chaves do Resend
-  message = message.replace(/re_[a-zA-Z0-9_-]+/gi, 're_[REDACTED]');
-
-  // Filtra tokens JWT ou Bearer
-  message = message.replace(/Bearer\s+[a-zA-Z0-9_.-]+/gi, 'Bearer [REDACTED]');
-
-  // Se o erro for uma falha de conexão interna do banco, não expõe a stack
-  if (message.includes('password') || message.includes('auth') || message.includes('connect') || message.includes('getaddrinfo')) {
-    return fallback;
-  }
-
-  return message;
+  if (safeMessages.has(message)) return message;
+  if (/^O destino respondeu com HTTP (?:[1-5]\d\d|inválido)\.$/.test(message)) return message;
+  return fallback;
 }

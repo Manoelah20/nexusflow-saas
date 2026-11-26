@@ -1,235 +1,160 @@
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+import { createHash } from 'node:crypto';
+import { and, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { db } from '@/db';
 import { apiKeys, automations, executionLogs } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { resend } from '@/lib/resend';
-import { z } from 'zod';
-import { createHash } from 'crypto';
-import { rateLimit } from '@/lib/rate-limit';
+import { getClientAddress, rateLimit } from '@/lib/rate-limit';
+import { readJsonWithLimit, RequestBodyTooLargeError } from '@/lib/read-json';
+import { escapeHtml, sendEmail } from '@/lib/resend';
+import { postJsonToPublicHttps } from '@/lib/safe-http';
 import { sanitizeErrorMessage } from '@/lib/safe-error';
 
-// Schema estrito de Ingestão com suporte a E-mail, WhatsApp, Slack e Discord
 const payloadSchema = z.object({
-  email: z.string().email().optional(),
-  name: z.string().optional(),
-  phone: z.string().min(8, 'Número de telefone deve conter DDI + DDD + Número').optional(),
-  message: z.string().min(1, 'Mensagem obrigatória'),
-  targetUrl: z.string().url().optional(), // Para webhooks Slack, Discord ou repasse HTTP
-});
+  email: z.string().trim().email().max(254).optional(),
+  name: z.string().trim().max(100).optional(),
+  phone: z.string().trim().min(8).max(32).optional(),
+  message: z.string().trim().min(1).max(5_000),
+}).strict();
+
+type Payload = z.infer<typeof payloadSchema>;
+
+function summarizePayload(payload: Payload) {
+  return {
+    hasEmail: Boolean(payload.email),
+    hasName: Boolean(payload.name),
+    hasPhone: Boolean(payload.phone),
+    messageLength: payload.message.length,
+  };
+}
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ triggerId: string }> }
+  { params }: { params: Promise<{ triggerId: string }> },
 ) {
-  const startTime = Date.now();
-  const resolvedParams = await params;
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown-ip';
-
-  // 🛡️ Rate Limiting: Máximo de 120 requisições por minuto por IP/Trigger
-  const limiter = rateLimit(`webhook:${resolvedParams.triggerId}:${ip}`, 120, 60000);
-  if (!limiter.success) {
-    return NextResponse.json(
-      { error: 'Rate limit excedido (máximo de 120 req/min). Aguarde alguns instantes.' },
-      { status: 429, headers: { 'Retry-After': '60' } }
-    );
-  }
-
+  const startedAt = Date.now();
   try {
-    // 1. Validar Bearer Token contra a tabela apiKeys (SHA-256)
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Token de autenticação ausente' }, { status: 401 });
+    const { triggerId } = await params;
+    const limiter = await rateLimit(`webhook:${triggerId}:${getClientAddress(request)}`, 120, 60_000);
+    if (!limiter.success) {
+      return NextResponse.json(
+        { error: 'Limite de requisições excedido. Aguarde e tente novamente.' },
+        { status: 429, headers: { 'Retry-After': String(Math.max(1, limiter.reset - Math.floor(Date.now() / 1000))) } },
+      );
     }
-    const token = authHeader.replace('Bearer ', '').trim();
-    const tokenHash = createHash('sha256').update(token).digest('hex');
 
+    const authHeader = request.headers.get('authorization') || '';
+    const match = /^Bearer\s+([a-f0-9]{64})$/i.exec(authHeader);
+    if (!match) return NextResponse.json({ error: 'Token de autenticação inválido.' }, { status: 401 });
+
+    const tokenHash = createHash('sha256').update(match[1]).digest('hex');
     const [apiKey] = await db
       .select({ userId: apiKeys.userId })
       .from(apiKeys)
       .where(eq(apiKeys.keyHash, tokenHash))
       .limit(1);
+    if (!apiKey) return NextResponse.json({ error: 'Token de autenticação inválido.' }, { status: 401 });
 
-    if (!apiKey) {
-      return NextResponse.json({ error: 'Token inválido ou não autorizado' }, { status: 401 });
-    }
-
-    // 2. Buscar Automação ativa pelo ID
     const [automation] = await db
       .select()
       .from(automations)
-      .where(
-        and(
-          eq(automations.id, resolvedParams.triggerId),
-          eq(automations.isActive, true)
-        )
-      )
+      .where(and(
+        eq(automations.id, triggerId),
+        eq(automations.userId, apiKey.userId),
+        eq(automations.isActive, true),
+      ))
       .limit(1);
-
-    if (!automation) {
-      return NextResponse.json({ error: 'Automação não encontrada ou inativa' }, { status: 404 });
+    if (!automation || automation.triggerType !== 'webhook') {
+      return NextResponse.json({ error: 'Webhook não encontrado ou inativo.' }, { status: 404 });
     }
 
-    // 3. Validar corpo da requisição com Zod
-    const rawBody = await request.json();
-    const parseResult = payloadSchema.safeParse(rawBody);
-
-    if (!parseResult.success) {
+    const body = await readJsonWithLimit(request, 32 * 1024);
+    const parsed = payloadSchema.safeParse(body);
+    if (!parsed.success) {
       await db.insert(executionLogs).values({
         automationId: automation.id,
         userId: automation.userId,
         status: 'failed',
-        payloadSummary: rawBody,
-        latencyMs: Date.now() - startTime,
-        errorMessage: 'Payload inválido conforme schema Zod',
+        payloadSummary: { invalidPayload: true },
+        latencyMs: Date.now() - startedAt,
+        errorMessage: 'Payload inválido.',
       });
-      return NextResponse.json(
-        { error: 'Payload inválido', details: parseResult.error.format() },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Payload inválido. Confira os campos permitidos e seus limites.' }, { status: 400 });
     }
 
-    const { email, name, phone, message, targetUrl } = parseResult.data;
-
-    // 4. Executar Ação Multi-Canal
-    let executionStatus: 'success' | 'failed' = 'success';
-    let errorMessage: string | null = null;
-    let dispatchDetails: Record<string, any> = {};
+    const payload = parsed.data;
+    const actionConfig = (automation.actionConfig || {}) as Record<string, unknown>;
+    const destination = typeof actionConfig.targetUrl === 'string' ? actionConfig.targetUrl : '';
+    let channel: string;
+    let statusCode: number | null = null;
 
     try {
-      // ── CANAL 1: E-mail Transacional (Resend) ───────────────────────────
       if (automation.actionType === 'send_email') {
-        const targetEmail = email || 'cliente@exemplo.com';
-        await resend.emails.send({
-          from: 'NexusFlow <automations@resend.dev>',
-          to: [targetEmail],
-          subject: `Notificação Automática: ${automation.name}`,
-          html: `<div>
-            <h2>Olá ${name || 'Cliente'},</h2>
-            <p>Sua automação disparou com sucesso:</p>
-            <blockquote style="background:#f4f4f5;padding:12px;border-left:4px solid #0284c7;">${message}</blockquote>
-            <p><small>Gerado por NexusFlow AI Engine</small></p>
-          </div>`,
+        if (!payload.email) throw new Error('Informe um e-mail de destino no evento.');
+        const safeName = escapeHtml(payload.name || 'Cliente');
+        const safeMessage = escapeHtml(payload.message);
+        await sendEmail(
+          payload.email,
+          `Notificação automática: ${automation.name}`,
+          `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a"><h2>Olá ${safeName},</h2><p>${safeMessage}</p><p><small>Mensagem enviada pelo NexusFlow.</small></p></div>`,
+          `Olá ${payload.name || 'Cliente'},\n\n${payload.message}\n\nMensagem enviada pelo NexusFlow.`,
+        );
+        channel = 'email';
+      } else if (automation.actionType === 'slack_webhook') {
+        if (!destination) throw new Error('A automação não tem um destino configurado.');
+        statusCode = await postJsonToPublicHttps(destination, {
+          text: `NexusFlow · ${automation.name}\n${payload.message}`,
         });
-        dispatchDetails = { channel: 'email', recipient: targetEmail };
+        channel = 'slack';
+      } else if (automation.actionType === 'discord_webhook') {
+        if (!destination) throw new Error('A automação não tem um destino configurado.');
+        statusCode = await postJsonToPublicHttps(destination, {
+          username: 'NexusFlow',
+          embeds: [{ title: automation.name, description: payload.message.slice(0, 4_000), color: 0x06b6d4 }],
+        });
+        channel = 'discord';
+      } else if (automation.actionType === 'http_post') {
+        if (!destination) throw new Error('A automação não tem um destino configurado.');
+        statusCode = await postJsonToPublicHttps(destination, payload);
+        channel = 'http';
+      } else {
+        throw new Error('Esta ação ainda não está habilitada.');
       }
-
-      // ── CANAL 2: WhatsApp (Z-API / Evolution / Gateway) ─────────────────
-      else if (automation.actionType === 'whatsapp_message') {
-        const targetPhone = phone || '5511999998888';
-        const formattedPhone = targetPhone.replace(/\D/g, '');
-        
-        // Se houver URL de webhook do gateway WhatsApp informada
-        if (targetUrl) {
-          await fetch(targetUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              number: formattedPhone,
-              text: `*NexusFlow:* Olá ${name || 'Cliente'}!\n\n${message}`,
-            }),
-          });
-        }
-        dispatchDetails = { channel: 'whatsapp', phone: formattedPhone, delivered: true };
-      }
-
-      // ── CANAL 3: Slack Incoming Webhook ─────────────────────────────────
-      else if (automation.actionType === 'slack_webhook') {
-        const webhookUrl = targetUrl || (automation.actionConfig as any)?.slackUrl;
-        if (webhookUrl) {
-          await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              text: `⚡ *NexusFlow Alert: ${automation.name}*`,
-              blocks: [
-                {
-                  type: 'section',
-                  text: {
-                    type: 'mrkdwn',
-                    text: `*Pipeline:* ${automation.name}\n*Contato:* ${name || 'N/A'} (${email || phone || 'N/A'})\n*Mensagem:* ${message}`,
-                  },
-                },
-              ],
-            }),
-          });
-        }
-        dispatchDetails = { channel: 'slack', status: 'posted' };
-      }
-
-      // ── CANAL 4: Discord Webhook ────────────────────────────────────────
-      else if (automation.actionType === 'discord_webhook') {
-        const webhookUrl = targetUrl || (automation.actionConfig as any)?.discordUrl;
-        if (webhookUrl) {
-          await fetch(webhookUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              username: 'NexusFlow Engine',
-              embeds: [
-                {
-                  title: `⚡ Evento Disparado: ${automation.name}`,
-                  description: message,
-                  color: 0x06b6d4, // Cyan
-                  fields: [
-                    { name: 'Usuário', value: name || 'N/A', inline: true },
-                    { name: 'Destinatário', value: email || phone || 'N/A', inline: true },
-                  ],
-                  footer: { text: 'NexusFlow Telemetry' },
-                  timestamp: new Date().toISOString(),
-                },
-              ],
-            }),
-          });
-        }
-        dispatchDetails = { channel: 'discord', status: 'posted' };
-      }
-
-      // ── CANAL 5: Repasse HTTP POST ──────────────────────────────────────
-      else if (automation.actionType === 'http_post') {
-        const forwardUrl = targetUrl || (automation.actionConfig as any)?.targetUrl;
-        if (forwardUrl) {
-          await fetch(forwardUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'User-Agent': 'NexusFlow-Forwarder/2.5' },
-            body: JSON.stringify(parseResult.data),
-          });
-        }
-        dispatchDetails = { channel: 'http_forward', url: forwardUrl };
-      }
-
-      // ── CANAL 6: Alerta Crítico / Sentry ─────────────────────────────────
-      else if (automation.actionType === 'critical_alert') {
-        dispatchDetails = { channel: 'critical_alert', severity: 'high', notified: true };
-      }
-    } catch (err: any) {
-      executionStatus = 'failed';
-      errorMessage = sanitizeErrorMessage(err, 'Erro durante o disparo da ação');
+    } catch (error) {
+      const safeMessage = sanitizeErrorMessage(error, 'Falha ao executar a ação configurada.');
+      await db.insert(executionLogs).values({
+        automationId: automation.id,
+        userId: automation.userId,
+        status: 'failed',
+        payloadSummary: summarizePayload(payload),
+        latencyMs: Date.now() - startedAt,
+        errorMessage: safeMessage,
+      });
+      return NextResponse.json({ error: safeMessage }, { status: 502 });
     }
 
-    const latency = Date.now() - startTime;
-
-    // 5. Gravar Log de Execução no Banco de Dados
+    const latency = Date.now() - startedAt;
     await db.insert(executionLogs).values({
       automationId: automation.id,
       userId: automation.userId,
-      status: executionStatus,
-      payloadSummary: { ...parseResult.data, _dispatch: dispatchDetails },
+      status: 'success',
+      payloadSummary: { ...summarizePayload(payload), channel, destinationStatus: statusCode },
       latencyMs: latency,
-      errorMessage: errorMessage,
     });
 
-    if (executionStatus === 'failed') {
-      return NextResponse.json({ error: errorMessage }, { status: 500 });
+    return NextResponse.json({ success: true, latency_ms: latency, channel });
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return NextResponse.json({ error: 'A requisição excede o tamanho permitido.' }, { status: 413 });
     }
-
-    return NextResponse.json({ success: true, latency_ms: latency, channel: automation.actionType });
-  } catch (err: any) {
+    if (error instanceof SyntaxError) return NextResponse.json({ error: 'JSON inválido.' }, { status: 400 });
+    console.error('Erro ao processar webhook.');
     return NextResponse.json(
-      { error: sanitizeErrorMessage(err, 'Erro interno no servidor') },
-      { status: 500 }
+      { error: sanitizeErrorMessage(error, 'Erro interno no servidor.') },
+      { status: 500 },
     );
   }
 }

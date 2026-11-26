@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signIn } from 'next-auth/react';
@@ -11,9 +11,11 @@ export default function LoginPage() {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetToken, setResetToken] = useState('');
+  const [verificationToken, setVerificationToken] = useState('');
   
-  // Modos da tela: 'signin' | 'signup' | 'forgot'
-  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot' | 'reset' | 'verify'>('signin');
   
   // Visibilidade de senhas
   const [showPassword, setShowPassword] = useState(false);
@@ -24,6 +26,24 @@ export default function LoginPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const router = useRouter();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const verification = params.get('verify');
+    const reset = params.get('token');
+    if (verification) {
+      setVerificationToken(verification);
+      setMode('verify');
+      window.history.replaceState({}, '', '/login');
+    } else if (reset) {
+      setResetToken(reset);
+      setMode('reset');
+      window.history.replaceState({}, '', '/login');
+    } else if (params.get('verified') === '1') {
+      setSuccessMsg('E-mail confirmado. Agora você já pode entrar.');
+      window.history.replaceState({}, '', '/login');
+    }
+  }, []);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,7 +57,7 @@ export default function LoginPage() {
         const res = await fetch('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, name }),
+          body: JSON.stringify({ email, name }),
         });
 
         const data = await res.json();
@@ -45,22 +65,9 @@ export default function LoginPage() {
           throw new Error(data.error || 'Erro ao registrar usuário');
         }
 
-        setSuccessMsg('Conta criada com sucesso! Entrando...');
-        
-        // Login automático após registro
-        const loginRes = await signIn('credentials', {
-          redirect: false,
-          email,
-          password,
-        });
-
-        if (loginRes?.error) {
-          setSuccessMsg('Conta criada! Faça login com suas credenciais.');
-          setMode('signin');
-        } else {
-          router.push('/dashboard');
-          router.refresh();
-        }
+        setSuccessMsg(data.message || 'Confira seu e-mail para confirmar a conta.');
+        setPassword('');
+        setMode('signin');
       } else if (mode === 'signin') {
         const loginRes = await signIn('credentials', {
           redirect: false,
@@ -75,20 +82,49 @@ export default function LoginPage() {
         router.push('/dashboard');
         router.refresh();
       } else if (mode === 'forgot') {
-        // Redefinição / Recadastro de senha
         const res = await fetch('/api/auth/reset-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, newPassword }),
+          body: JSON.stringify({ mode: 'request', email }),
         });
 
         const data = await res.json();
         if (!res.ok) {
-          throw new Error(data.error || 'Erro ao redefinir senha');
+          throw new Error(data.error || 'Erro ao solicitar recuperação de senha');
         }
 
-        setSuccessMsg('Nova senha cadastrada com sucesso! Faça login com a nova senha.');
-        setPassword(newPassword);
+        setSuccessMsg(data.message || 'Se houver uma conta para esse e-mail, enviaremos um link.');
+      } else if (mode === 'reset') {
+        if (newPassword !== confirmPassword) throw new Error('As senhas não coincidem.');
+        const res = await fetch('/api/auth/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'complete', token: resetToken, newPassword }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erro ao redefinir senha');
+
+        setSuccessMsg(data.message || 'Senha alterada. Entre novamente.');
+        setResetToken('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setMode('signin');
+      } else if (mode === 'verify') {
+        if (newPassword !== confirmPassword) throw new Error('As senhas não coincidem.');
+        const res = await fetch('/api/auth/verify-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: verificationToken, password: newPassword }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erro ao confirmar o e-mail');
+
+        setSuccessMsg(data.message || 'E-mail confirmado. Faça login.');
+        setVerificationToken('');
+        setNewPassword('');
+        setConfirmPassword('');
         setMode('signin');
       }
     } catch (err: any) {
@@ -118,7 +154,9 @@ export default function LoginPage() {
           <p className="text-sm text-slate-400 font-light">
             {mode === 'signup' && 'Crie sua conta no NexusFlow'}
             {mode === 'signin' && 'Entre para gerenciar suas automações'}
-            {mode === 'forgot' && 'Recadastrar nova senha de acesso'}
+            {mode === 'forgot' && 'Receba um link para redefinir sua senha'}
+            {mode === 'reset' && 'Escolha uma nova senha de acesso'}
+            {mode === 'verify' && 'Confirme seu e-mail e escolha uma senha'}
           </p>
         </div>
 
@@ -153,7 +191,7 @@ export default function LoginPage() {
               </div>
             )}
 
-            <div>
+            {mode !== 'reset' && mode !== 'verify' && <div>
               <label className="block text-xs text-slate-400 mb-1 font-mono">E-mail corporativo ou pessoal</label>
               <div className="relative">
                 <input
@@ -166,9 +204,9 @@ export default function LoginPage() {
                 />
                 <Mail size={16} className="absolute left-3 top-3 text-slate-500" />
               </div>
-            </div>
+            </div>}
 
-            {mode !== 'forgot' && (
+            {mode === 'signin' && (
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs text-slate-400 font-mono">Senha</label>
@@ -208,15 +246,16 @@ export default function LoginPage() {
               </div>
             )}
 
-            {mode === 'forgot' && (
+            {(mode === 'reset' || mode === 'verify') && (
               <div>
                 <label className="block text-xs text-slate-400 mb-1 font-mono">Nova Senha</label>
                 <div className="relative">
                   <input
                     type={showNewPassword ? 'text' : 'password'}
                     required
-                    placeholder="Mínimo de 6 caracteres"
+                    placeholder="Mínimo de 12 caracteres"
                     value={newPassword}
+                    minLength={12}
                     onChange={(e) => setNewPassword(e.target.value)}
                     className="w-full px-3 py-2.5 pl-9 pr-10 bg-slate-950/80 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 text-xs font-mono"
                   />
@@ -233,6 +272,23 @@ export default function LoginPage() {
               </div>
             )}
 
+            {(mode === 'reset' || mode === 'verify') && (
+              <div>
+                <label className="block text-xs text-slate-400 mb-1 font-mono">Confirme a nova senha</label>
+                <input
+                  type="password"
+                  required
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  placeholder="Digite a mesma senha novamente"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-slate-950/80 border border-white/10 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 text-xs font-mono"
+                />
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}
@@ -244,6 +300,10 @@ export default function LoginPage() {
                 <>Criar Conta <ArrowRight size={16} /></>
               ) : mode === 'signin' ? (
                 <>Acessar Painel <ArrowRight size={16} /></>
+              ) : mode === 'forgot' ? (
+                <>Enviar link de redefinição <Mail size={16} /></>
+              ) : mode === 'verify' ? (
+                <>Confirmar e criar conta <Mail size={16} /></>
               ) : (
                 <>Confirmar Nova Senha <KeyRound size={16} /></>
               )}
@@ -252,7 +312,7 @@ export default function LoginPage() {
 
           {/* Toggle entre modos */}
           <div className="mt-6 pt-6 border-t border-white/[0.08] text-center text-xs text-slate-400 font-mono">
-            {mode === 'forgot' ? (
+            {mode === 'forgot' || mode === 'reset' || mode === 'verify' ? (
               <button
                 type="button"
                 onClick={() => {

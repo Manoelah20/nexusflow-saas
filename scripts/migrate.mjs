@@ -20,9 +20,10 @@ async function runMigration() {
 
   // Quebrar em comandos individuais (ignora comentários e linhas vazias)
   const statements = initSql
+    .replace(/^\s*--.*$/gm, '')
     .split(';')
     .map(s => s.trim())
-    .filter(s => s.length > 0 && !s.startsWith('--'));
+    .filter(s => s.length > 0);
 
   for (const statement of statements) {
     await sql(statement);

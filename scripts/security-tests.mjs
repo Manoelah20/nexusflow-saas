@@ -6,14 +6,19 @@ import { eq, and, sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'crypto';
 import { z } from 'zod';
-import pkg from '@next/env';
-const { loadEnvConfig } = pkg;
-
-loadEnvConfig(process.cwd());
-
-const dbUrl = process.env.DATABASE_URL;
+// Esta suíte grava usuários, chaves, automações e logs e depois os remove.
+// Exige um banco descartável indicado explicitamente; nunca usa .env.local.
+const dbUrl = process.env.NEXUSFLOW_TEST_DATABASE_URL;
 if (!dbUrl) {
-  console.error('DATABASE_URL ausente');
+  console.error('Defina NEXUSFLOW_TEST_DATABASE_URL com a URL de um banco descartável exclusivo para testes.');
+  process.exit(1);
+}
+if (process.env.DATABASE_URL && dbUrl === process.env.DATABASE_URL) {
+  console.error('O banco de testes não pode ser o mesmo DATABASE_URL da aplicação.');
+  process.exit(1);
+}
+if (process.env.NEXUSFLOW_ALLOW_DESTRUCTIVE_SECURITY_TESTS !== 'true') {
+  console.error('A suíte grava e apaga dados. Para confirmar o uso de um banco descartável, defina NEXUSFLOW_ALLOW_DESTRUCTIVE_SECURITY_TESTS=true.');
   process.exit(1);
 }
 

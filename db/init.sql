@@ -6,8 +6,41 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
   name TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  session_version INTEGER DEFAULT 0 NOT NULL,
+  email_verified_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER DEFAULT 0 NOT NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS email_verification_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id ON email_verification_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+  bucket_hash TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  reset_at TIMESTAMP WITH TIME ZONE NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limit_buckets_reset_at ON rate_limit_buckets(reset_at);
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -23,11 +56,15 @@ CREATE TABLE IF NOT EXISTS automations (
   name TEXT NOT NULL,
   trigger_type TEXT NOT NULL CHECK (trigger_type IN ('webhook', 'cron', 'db_event')),
   filter_condition JSONB DEFAULT '{}'::jsonb NOT NULL,
-  action_type TEXT NOT NULL CHECK (action_type IN ('send_email', 'http_post', 'critical_alert')),
+  action_type TEXT NOT NULL CHECK (action_type IN ('send_email', 'http_post', 'critical_alert', 'whatsapp_message', 'slack_webhook', 'discord_webhook')),
   action_config JSONB DEFAULT '{}'::jsonb NOT NULL,
   is_active BOOLEAN DEFAULT TRUE NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
 );
+
+ALTER TABLE automations DROP CONSTRAINT IF EXISTS automations_action_type_check;
+ALTER TABLE automations ADD CONSTRAINT automations_action_type_check
+  CHECK (action_type IN ('send_email', 'http_post', 'critical_alert', 'whatsapp_message', 'slack_webhook', 'discord_webhook'));
 
 CREATE TABLE IF NOT EXISTS execution_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

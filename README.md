@@ -1,19 +1,19 @@
-# ⚡ NexusFlow SaaS — Next-Gen Realtime Event Engine
+# NexusFlow
 
-> **Plataforma Enterprise de Orquestração de Webhooks e Automação de Eventos com Telemetria em Tempo Real.**
+> Protótipo de aplicação SaaS para receber webhooks autenticados, validar eventos e executar ações configuradas.
 
-Desenvolvido para engenheiros de produto, desenvolvedores e empresas modernas que precisam conectar eventos externos (compras em e-commerce, alertas de segurança, transações bancárias, webhooks de terceiros) a ações automatizadas com latência ultra-baixa e monitoramento ao vivo.
+O projeto está em desenvolvimento e ainda não deve ser tratado como serviço comercial pronto. A página de planos é demonstrativa; autenticação, e-mail e banco exigem configuração própria. Faça a revisão de segurança e privacidade do seu ambiente antes de usar dados reais.
 
 ---
 
 ## 🎯 Para que este aplicativo serve?
 
-Imagine que seu sistema ou loja virtual (ex: Shopify, Stripe, Hotmart, Mercado Pago ou seu próprio backend) acaba de confirmar uma venda ou detectar um erro crítico:
+O NexusFlow recebe requisições HTTP POST autenticadas por uma chave Bearer e valida um conjunto limitado de campos. Para um evento aceito, pode enviar e-mail via Resend, publicar em um webhook Slack/Discord ou encaminhar um POST HTTP para um endereço HTTPS público.
 
-1. **Recebimento Instantâneo (Ingestion)**: O NexusFlow disponibiliza endpoints HTTP tipados e blindados com autenticação Bearer para receber dados via POST.
-2. **Validação Estrita de Dados**: Cada payload JSON é validado em microssegundos com **Zod**, rejeitando requisições malformadas ou com dados incompletos.
-3. **Disparo de Ações (Dispatch)**: Executa ações automáticas de alta prioridade (como envio de e-mails transacionais via **Resend**, alertas de incidentes ou repasse HTTP).
-4. **Telemetria e Auditoria em Tempo Real**: Cada disparo é registrado no banco com métricas de latência em milissegundos, status de entrega (`200 OK` ou `FAILED`) e payload completo inspecionável para depuração.
+1. **Recebimento**: Endpoint HTTP POST por automação, protegido por chave Bearer.
+2. **Validação**: O payload permitido é validado com Zod e tem limite de tamanho.
+3. **Ações disponíveis**: E-mail via Resend, webhook Slack/Discord e repasse HTTP.
+4. **Registro**: O banco guarda resultado, latência e resumo dos campos; o conteúdo pessoal completo não é incluído no resumo do log.
 
 ---
 
@@ -45,7 +45,7 @@ Imagine que seu sistema ou loja virtual (ex: Shopify, Stripe, Hotmart, Mercado P
 - 👁️ **Visualização de Senha**: Alternância com 1 clique (ícone de olho) para conferir a senha digitada.
 - 🔑 **Recadastrar Senha**: Opção "Esqueceu a senha?" integrada na tela de login com recadastro seguro e invalidação da senha anterior.
 - 🛡️ **Segurança Multi-Tenant**: Dados e pipelines totalmente isolados por usuário (UUIDs v4).
-- 🔒 **API Keys Criptografadas**: Autenticação de webhooks baseada em hash SHA-256 (tokens puros nunca são expostos no banco).
+- 🔒 **API Keys protegidas**: Autenticação de webhooks baseada em hash SHA-256 (tokens puros nunca são armazenados no banco e só podem ser copiados uma vez na interface).
 - 🧪 **Simulador de Eventos Integrado**: Teste seus webhooks direto pelo navegador com injeção de payloads customizados.
 - 💻 **Gerador Automático de cURL**: Copie chamadas prontas para integrar no terminal ou no Postman.
 - 📊 **Console de Telemetria**: Visualização detalhada de histórico, latência em ms e modal de depuração de payloads.
@@ -68,12 +68,13 @@ Crie um arquivo `.env.local` na raiz do projeto com suas credenciais:
 # Banco de dados Neon (PostgreSQL gratuito em https://neon.tech):
 DATABASE_URL="postgresql://usuario:senha@ep-exemplo.us-east-1.aws.neon.tech/neondb?sslmode=require"
 
-# Segredo de sessão JWT do NextAuth:
+# Segredo de sessão do NextAuth:
 AUTH_SECRET="chave-secreta-aleatoria-de-32-caracteres"
-NEXTAUTH_URL="http://localhost:3000"
+AUTH_URL="http://localhost:3000"
 
-# Chave de e-mails do Resend (opcional para testes reais em https://resend.com):
+# E-mail transacional (necessário para cadastro e recuperação de senha):
 RESEND_API_KEY="re_123456789_abcdefghijklmnopqrstuvwxyz"
+RESEND_FROM_EMAIL="NexusFlow <noreply@seu-dominio-verificado.com>"
 ```
 
 ### 3. Criar as tabelas no banco de dados
@@ -92,12 +93,15 @@ Abra seu navegador em **[http://localhost:3000](http://localhost:3000)**.
 
 ## 🧪 Suíte de Testes de Segurança
 
-O projeto conta com uma suíte automatizada de testes cobrindo SQL Injection, hashing bcrypt, isolamento multi-tenant, tokens SHA-256 e validação Zod:
+Existe uma suíte que grava e apaga dados. **Nunca a execute apontando para produção.** Use apenas um banco PostgreSQL descartável e isolado, com as tabelas criadas, e configure explicitamente:
 
 ```bash
-npx tsx scripts/security-tests.mjs
+$env:NEXUSFLOW_TEST_DATABASE_URL="postgresql://.../banco_descartavel?sslmode=require"
+$env:NEXUSFLOW_ALLOW_DESTRUCTIVE_SECURITY_TESTS="true"
+npm run security:test
 ```
-*Resultado: 22 testes de segurança executados e 100% aprovados.*
+
+O script não carrega `.env.local` e exige uma confirmação adicional porque remove os dados de teste ao final. A suíte ainda precisa ser atualizada para cobrir os novos fluxos de confirmação de e-mail e rate limiting.
 
 ---
 

@@ -17,7 +17,7 @@ create table public.automations (
   name text not null,
   trigger_type text not null check (trigger_type in ('webhook', 'cron', 'db_event')),
   filter_condition jsonb default '{}'::jsonb,
-  action_type text not null check (action_type in ('send_email', 'http_post', 'critical_alert')),
+  action_type text not null check (action_type in ('send_email', 'http_post', 'critical_alert', 'whatsapp_message', 'slack_webhook', 'discord_webhook')),
   action_config jsonb default '{}'::jsonb,
   is_active boolean default true not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
